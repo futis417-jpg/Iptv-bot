@@ -1,0 +1,24 @@
+name: IPTV_GLOBAL_BOT_PRO
+on:
+  schedule:
+    - cron: '0 */3 * * *' # Ejecuta cada 3 horas en punto
+  workflow_dispatch:      # Para darle tú al botón cuando quieras
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Librerías
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: 🚀 Ejecutar Rastreador
+        run: python script.py
