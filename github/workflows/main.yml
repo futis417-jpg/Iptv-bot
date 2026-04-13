@@ -1,21 +1,24 @@
-name: IPTV_WEB_SCANNER_PRO
+name: IPTV_GLOBAL_BOT_PRO
 on:
   schedule:
-    - cron: '0 */3 * * *' # Cada 3 horas sin falta
-  workflow_dispatch:
+    - cron: '0 */3 * * *' # Ejecuta cada 3 horas en punto
+  workflow_dispatch:      # Para darle tú al botón cuando quieras
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout Código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - name: Instalando Motores
-        run: pip install requests beautifulsoup4
-      - name: Ejecutando Escáner Global
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Instalar Librerías
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: 🚀 Ejecutar Rastreador
         run: python script.py
