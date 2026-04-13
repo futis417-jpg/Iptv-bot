@@ -4,101 +4,105 @@ import re
 import concurrent.futures
 import time
 
-# --- CONFIGURACIÓN CRÍTICA ---
+# --- DATOS DE CONEXIÓN ---
 TOKEN = "8718780006:AAHXJl8aS26q84i0mPopgVx5wZQG4JCvFwk"
 CHAT_ID = "@iptvlinkspro"
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
 }
 
-def analizar_lista_profundo(url):
-    """Descarga la lista y cuenta cuántos canales de España/Fútbol tiene realmente"""
+def analizar_calidad_premium(url):
+    """Analiza si la lista es pesada y completa (estilo TeleLatino)"""
     try:
-        # Descargamos los primeros 50KB para no saturar, suficiente para ver canales
-        r = requests.get(url, headers=HEADERS, timeout=10)
-        if r.status_code == 200 and "#EXTM3U" in r.text:
-            contenido = r.text.upper()
+        # Aumentamos el timeout porque las listas grandes tardan en responder
+        r = requests.get(url, headers=HEADERS, timeout=20, stream=True)
+        if r.status_code == 200:
+            # Leemos un bloque grande para detectar calidad de metadatos (logos, grupos)
+            text = r.raw.read(200000).decode('utf-8', errors='ignore').upper()
             
-            # Palabras clave de fútbol y España
-            keywords = ["MOVISTAR", "DAZN", "LALIGA", "SPAIN", "ESPAÑA", "M. +", "LALIGA TV", "CHAMPIONS"]
-            conteo = sum(1 for k in keywords if k in contenido)
+            if "#EXTM3U" not in text:
+                return None
+
+            # Puntuación de "Belleza" de la lista
+            puntos = 0
+            if "GROUP-TITLE" in text: puntos += 10  # Está organizada por categorías
+            if "TVG-LOGO" in text: puntos += 10     # Tiene logos de canales
+            if "MOVISTAR" in text or "DAZN" in text: puntos += 15 # Tiene fútbol pro
+            if "NETFLIX" in text or "HBO" in text: puntos += 5   # Tiene pelis/series
             
-            # Solo aceptamos listas que tengan al menos 2 canales de estos
-            if conteo >= 1:
-                # Intentamos validar si los links de los canales dentro responden (Opcional, consume tiempo)
-                return (url, conteo)
+            # Clasificación
+            es_futbol = any(x in text for x in ["MOVISTAR", "DAZN", "LALIGA", "BEIN", "SKY SPORTS"])
+            categoria = "⚽️ FÚTBOL & PREMIUM" if es_futbol else "🎬 CINE & SERIES PRO"
+            
+            # Solo enviamos listas con buena puntuación (mínimo 10 puntos)
+            if puntos >= 10:
+                return {"url": url, "cat": categoria, "puntos": puntos}
     except:
         return None
     return None
 
-def rastrear_fuentes_avanzadas():
-    """Busca en sitios de 'paste' y buscadores de archivos m3u8 frescos"""
-    enlaces = set()
-    
-    # Webs de 'leaks' de listas que se actualizan cada hora
-    motores = [
+def recolectar_fuentes_elite():
+    """Busca en servidores que alojan listas masivas"""
+    links = set()
+    fuentes = [
         "https://iptv-org.github.io/iptv/index.m3u",
-        "https://iptv-org.github.io/iptv/countries/es.m3u",
         "https://raw.githubusercontent.com/vps01box/AM-IPTV/main/lista.m3u",
         "https://raw.githubusercontent.com/pizofm/Latino/master/Lista.m3u",
         "https://raw.githubusercontent.com/clancat/m3u/main/spanish.m3u",
-        "https://www.telegra.ph/IPTV-SPAIN-FUTBOL-FREE",
+        "https://raw.githubusercontent.com/teleriumtv/m3u/master/list.m3u",
+        "https://raw.githubusercontent.com/funcotv/funcotv/main/free.m3u",
+        "https://pastebin.com/raw/uS9q6Se7",
         "https://pastebin.com/raw/8YpYqL6a",
-        "https://bit.ly/iptv-spain-m3u"
+        "https://raw.githubusercontent.com/Kodi-Vigo/TV/master/peli.m3u", # Cine
+        "https://raw.githubusercontent.com/Guydun/IPTV/main/All_Channels.m3u"
     ]
-
-    for url in motores:
+    
+    for f in fuentes:
         try:
-            r = requests.get(url, headers=HEADERS, timeout=10)
-            # Buscador de patrones m3u/m3u8
-            encontrados = re.findall(r'https?://[^\s<>"]+\.m3u[8]?', r.text)
-            enlaces.update(encontrados)
-        except:
-            continue
-    return list(enlaces)
+            r = requests.get(f, headers=HEADERS, timeout=10)
+            found = re.findall(r'https?://[^\s<>"]+\.m3u[8]?', r.text)
+            links.update(found)
+        except: continue
+    return list(links)
 
-def enviar_reporte_calidad(listas):
-    if not listas:
-        return
-    
-    # Ordenar por cantidad de canales de fútbol/España encontrados (los mejores primero)
-    listas.sort(key=lambda x: x[1], reverse=True)
-    
-    ahora = time.strftime("%H:%M")
-    msg = f"🛰 **REPORTE DE ALTA CALIDAD** ({ahora})\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "🇪🇸 **FOCO: FÚTBOL ESPAÑA (MOVISTAR/DAZN)** ⚽️\n\n"
-    msg += "*(Estas listas han sido analizadas y contienen canales activos)*\n\n"
-    
-    for i, (link, canales) in enumerate(listas[:20], 1):
-        # Ponemos corona a las que tienen mucho contenido
-        emoji = "👑" if canales > 3 else "⭐️"
-        msg += f"{emoji} **LISTA {i} (Calidad: {canales}):**\n`{link}`\n\n"
-        
-        if len(msg) > 3800: break
+def enviar_telegram_estilo_premium(resultados):
+    if not resultados: return
+
+    # Separar y ordenar por puntos (las mejores arriba)
+    futbol = sorted([r for r in resultados if "FÚTBOL" in r['cat']], key=lambda x: x['puntos'], reverse=True)
+    cine = sorted([r for r in resultados if "CINE" in r['cat']], key=lambda x: x['puntos'], reverse=True)
+
+    msg = f"💎 **IPTV PREMIUM STYLE** 💎\n"
+    msg += f"✨ *Calidad Tele Latino | {time.strftime('%H:%M')}*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # SECCIÓN FÚTBOL
+    msg += "🏆 **TOP 10 FÚTBOL ESPAÑA**\n"
+    for i, item in enumerate(futbol[:10], 1):
+        msg += f"{i}️⃣ `{item['url']}`\n\n"
+
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # SECCIÓN CINE Y SERIES
+    msg += "🍿 **TOP 10 PELIS Y SERIES**\n"
+    for i, item in enumerate(cine[:10], 1):
+        msg += f"{i}️⃣ `{item['url']}`\n\n"
 
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "📢 *Actualización cada 3 horas. Únete:* @iptvlinkspro"
+    msg += "⭐ **TIP:** Estas listas tienen logos y categorías.\n"
+    msg += "📲 @iptvlinkspro"
 
     requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
                   data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": "true"})
 
-def main():
-    print("🚀 Buscando fuentes en la red...")
-    candidatos = rastrear_fuentes_avanzadas()
-    
-    print(f"🔬 Analizando contenido real de {len(candidatos)} listas...")
-    validos = []
-    
-    # Subimos a 50 hilos para que no tarde nada
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        resultados = executor.map(analizar_lista_profundo, candidatos)
-        for res in resultados:
-            if res:
-                validos.append(res)
-    
-    enviar_reporte_calidad(validos)
-
 if __name__ == "__main__":
-    main()
+    candidatos = recolectar_fuentes_elite()
+    finales = []
+    # Usamos 15 hilos para no saturar y que el análisis sea profundo
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        res = executor.map(analizar_calidad_premium, candidatos)
+        for r in res:
+            if r: finales.append(r)
+    
+    enviar_telegram_estilo_premium(finales)
