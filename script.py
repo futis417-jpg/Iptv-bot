@@ -2,94 +2,123 @@ import requests
 import os
 import re
 import concurrent.futures
+import time
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# CONFIGURACIÓN
-TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+# --- CONFIGURACIÓN DE ACCESO ---
+TOKEN = "8718780006:AAHXJl8aS26q84i0mPopgVx5wZQG4JCvFwk"
+CHAT_ID = "@iptvlinkspro"  # Tu canal
 
+# Headers para saltar bloqueos de seguridad de las webs
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
 }
 
-def validar_m3u(url):
-    """Verifica si el link es un archivo m3u real y está vivo"""
+def session_config():
+    """Configura reintentos para que el bot no se rinda si una web va lenta"""
+    s = requests.Session()
+    retries = Retry(total=3, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504])
+    s.mount('https://', HTTPAdapter(max_retries=retries))
+    return s
+
+def validar_m3u_pro(url):
+    """Verifica si el link es una lista m3u real y está online"""
     try:
-        # Algunos servidores bloquean peticiones HEAD, usamos GET limitado
-        with requests.get(url, headers=HEADERS, timeout=10, stream=True) as r:
+        session = session_config()
+        # Pedimos solo el inicio del archivo para ahorrar datos y tiempo
+        with session.get(url, headers=HEADERS, timeout=12, stream=True) as r:
             if r.status_code == 200:
-                # Leemos los primeros 100 bytes para buscar la firma EXTM3U
-                chunk = r.raw.read(100).decode('utf-8', errors='ignore')
-                if "#EXTM3U" in chunk or "EXTINF" in chunk:
+                first_line = next(r.iter_lines()).decode('utf-8', errors='ignore')
+                if "#EXTM3U" in first_line:
                     return url
     except:
         return None
     return None
 
-def buscar_en_la_web():
-    """Busca links .m3u en sitios de intercambio de texto y buscadores"""
+def rastrear_web_global():
+    """Busca links en toda la web usando patrones de texto"""
     urls_encontradas = set()
     
-    # 1. Fuentes fijas de alta calidad (GitHub)
+    # 1. Repositorios de listas estables
     urls_encontradas.update([
         "https://iptv-org.github.io/iptv/index.m3u",
         "https://iptv-org.github.io/iptv/languages/spa.m3u",
+        "https://raw.githubusercontent.com/teleriumtv/m3u/master/list.m3u",
         "https://raw.githubusercontent.com/vps01box/AM-IPTV/main/lista.m3u",
-        "https://raw.githubusercontent.com/pizofm/Latino/master/Lista.m3u"
+        "https://raw.githubusercontent.com/pizofm/Latino/master/Lista.m3u",
+        "https://raw.githubusercontent.com/funcotv/funcotv/main/free.m3u",
+        "https://raw.githubusercontent.com/LaQuay/TDTChannels/master/lists/tv.m3u8"
     ])
 
-    # 2. Rastreo en sitios de 'Paste' (donde se suben listas de fútbol diario)
-    # Buscamos en sitios como Telegra.ph que se usa mucho para IPTV
-    queries = ["https://telegra.ph/IPTV-Spain-M3U", "https://pastebin.com/raw/8YpYqL6a"] # Ejemplos
-    
-    # 3. Simulación de búsqueda en sitios de listas actualizadas
-    # Aquí el bot "escanea" webs que publican links m3u8
-    webs_iptv = [
-        "https://www.telegra.ph/LISTAS-IPTV-ACTUALIZADAS-04-13", # Ejemplo de fecha de hoy
+    # 2. Scrapeo de sitios temporales (Donde se sube el fútbol)
+    fuentes_web = [
+        "https://www.telegra.ph/LISTAS-IPTV-DIARIAS-04-13",
+        "https://pastebin.com/archive" 
     ]
 
-    for web in webs_iptv:
+    for sitio in fuentes_web:
         try:
-            r = requests.get(web, headers=HEADERS, timeout=10)
-            # Buscamos cualquier cosa que parezca un link m3u/m3u8 en el código fuente
+            r = requests.get(sitio, headers=HEADERS, timeout=10)
+            # Buscamos links que terminen en m3u o m3u8
             links = re.findall(r'https?://[^\s<>"]+\.m3u[8]?', r.text)
             urls_encontradas.update(links)
         except:
             continue
-
+            
     return list(urls_encontradas)
 
+def enviar_reporte(listas):
+    """Formatea el mensaje y lo envía al canal de Telegram"""
+    if not listas:
+        msg = "⚠️ *Aviso:* No se han encontrado nuevas listas estables en este rastreo."
+    else:
+        ahora = time.strftime("%H:%M")
+        msg = f"🚀 **¡NUEVAS LISTAS DETECTADAS!** ({ahora})\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "⚽️ *Canales de Fútbol, Cine y TV Premium:*\n\n"
+        
+        # Enviamos máximo 10 links para no saturar
+        for i, link in enumerate(listas[:12], 1):
+            msg += f"✅ **LISTA {i}:**\n`{link}`\n\n"
+            
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "📺 **Instrucciones IBBO Player:**\n"
+        msg += "1️⃣ Toca el link de arriba (se copiará).\n"
+        msg += "2️⃣ Abre Ibbo Player > Add Playlist.\n"
+        msg += "3️⃣ Pega el link en 'Remote Playlist'.\n\n"
+        msg += "🔥 *¡Únete y comparte:* @iptvlinkspro"
+
+    send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": "true"
+    }
+    requests.post(send_url, data=payload)
+
 def main():
-    print("🌐 Iniciando rastreo web global...")
-    potenciales = buscar_en_la_web()
+    print("🛰️ Iniciando sistema de rastreo IPTV Global...")
+    print("🔍 Buscando en webs, foros y repositorios...")
+    
+    links_potenciales = rastrear_web_global()
+    
+    print(f"📡 Se han encontrado {len(links_potenciales)} candidatos. Validando...")
     
     validos = []
-    # Validamos en paralelo para no tardar horas
-    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
-        resultados = executor.map(validar_m3u, potenciales)
+    # Usamos 30 hilos para validar todo en segundos
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+        resultados = executor.map(validar_m3u_pro, links_potenciales)
         for r in resultados:
             if r:
                 validos.append(r)
-
-    if validos:
-        # Dividimos en categorías para el canal
-        msg = "🌍 **RASTREO WEB IPTV COMPLETO** 🌍\n"
-        msg += "*(Enlaces directos encontrados en webs y foros)*\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━\n"
-        
-        # Limitar a los 10 mejores para no saturar Telegram
-        for link in validos[:12]:
-            msg += f"📦 `{link}`\n\n"
-            
-        msg += "━━━━━━━━━━━━━━━━━━━━\n"
-        msg += "🏆 *Fútbol, Canales Premium y TDT*\n"
-        msg += "⚠️ *Usa estos links en tu IBBO Player ahora.*"
-    else:
-        msg = "⚠️ No se han encontrado nuevas listas en la web en este momento."
-
-    # Enviar a Telegram
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                  data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": "true"})
+    
+    print(f"✅ Validación terminada. {len(validos)} listas listas para usar.")
+    enviar_reporte(validos)
 
 if __name__ == "__main__":
     main()
